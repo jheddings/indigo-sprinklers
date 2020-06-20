@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<Devices>
+
+  <Device type="sprinkler" id="MasterController">
+
+    <Name>Master Controller</Name>
+
+    <ConfigUI>
+      <Field type="list" id="controllers">
+        <Label>Remote Controllers:</Label>
+        <List class="indigo.devices" filter="indigo.sprinkler"/>
+      </Field>
+      <Field id="controllersHelp" type="label" fontSize="mini" alignWithControl="true">
+        <Label>(required) the remote controllers managed by this master</Label>
+      </Field>
+
+    </ConfigUI>
+  </Device>
+
+</Devices>
