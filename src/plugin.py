@@ -17,6 +17,8 @@ class Plugin(iplug.ThreadedPlugin):
     def deviceStartComm(self, device):
         iplug.PluginBase.deviceStartComm(self, device)
 
+        self.logger.debug('current props: %s', device.pluginProps)
+
         typeId = device.deviceTypeId
 
         if typeId == 'MasterController':
@@ -33,7 +35,7 @@ class Plugin(iplug.ThreadedPlugin):
 
     #---------------------------------------------------------------------------
     def runLoopStep(self): pass
-    # TODO self._updateAllStatus()
+    # TODO self._updateAllDevices()
 
     #---------------------------------------------------------------------------
     def loadPluginPrefs(self, prefs):
@@ -53,17 +55,6 @@ class Plugin(iplug.ThreadedPlugin):
         elif action.sprinklerAction == indigo.kSprinklerAction.AllZonesOff:
             self._allZonesOff(device)
 
-        ############################################
-        # XXX requires OverrideScheduleActions property...
-        elif action.sprinklerAction == indigo.kSprinklerAction.RunNewSchedule or \
-             action.sprinklerAction == indigo.kSprinklerAction.RunPreviousSchedule or \
-             action.sprinklerAction == indigo.kSprinklerAction.PauseSchedule or \
-             action.sprinklerAction == indigo.kSprinklerAction.ResumeSchedule or \
-             action.sprinklerAction == indigo.kSprinklerAction.StopSchedule or \
-             action.sprinklerAction == indigo.kSprinklerAction.PreviousZone or \
-             action.sprinklerAction == indigo.kSprinklerAction.NextZone:
-            pass
-
     #---------------------------------------------------------------------------
     # General Action callback
     def actionControlUniversal(self, action, device):
@@ -74,28 +65,36 @@ class Plugin(iplug.ThreadedPlugin):
             self._updateStatus(device)
 
     #---------------------------------------------------------------------------
-    def _turnZoneOn(self, master, masterZoneNumber):
-        # TODO need to stop watering on other controllers...
-        self.logger.debug('turning on master zone %d -- %s', masterZoneNumber, master.name)
+    def _turnZoneOn(self, master, masterZoneId):
+        self.logger.debug('turning on master zone %d -- %s', masterZoneId, master.name)
 
-        zoneInfo = self._getSlaveZoneInfo(master, masterZoneNumber)
+        # lookup the slave zone information from the master map
+        zoneInfo = self._getSlaveZoneInfo(master, masterZoneId)
+        self.logger.debug('found zone info in map: %s', zoneInfo)
+
         zoneName = zoneInfo['zoneName']
-        slaveZoneId = zoneInfo['zoneId']
+        zoneId = zoneInfo['zoneId']
         slaveId = zoneInfo['controllerId']
+        slave = indigo.devices[slaveId]
 
-        if slaveId not in indigo.devices:
-            self.logger.warn('controller not found: %d', contollerId)
+        # check for an active program...
+        if 'activeSlaveId' in master.states:
+            activeSlaveId = master.states['activeSlaveId']
+            self.logger.debug('active slave: %d', activeSlaveId)
 
-        else:
-            controller = indigo.devices[slaveId]
+            # if something is running, but it isn't on the same controller...
+            if activeSlaveId is not 0 and activeSlaveId is not None:
+                if activeSlaveId != slaveId:
+                    indigo.sprinkler.stop(activeSlaveId)
 
-            self.logger.debug('starting zone %s (%d) on controller: %s',
-                              zoneName, slaveZoneId, controller.name)
+        self.logger.debug('starting zone %s (%d) on slave: %s',
+                          zoneName, zoneId, slave.name)
 
-            indigo.sprinkler.setActiveZone(controller, index=slaveZoneId)
-            master.updateStateOnServer("activeZone", masterZoneNumber)
-            master.updateStateOnServer("activeSlaveId", slaveId)
-            master.updateStateOnServer("activeSlaveZone", slaveZoneId)
+        indigo.sprinkler.setActiveZone(slave, index=zoneId)
+
+        master.updateStateOnServer("activeSlaveId", slaveId)
+        master.updateStateOnServer("activeSlaveZone", zoneId)
+        master.updateStateOnServer("activeZone", masterZoneId)
 
     #---------------------------------------------------------------------------
     def _allZonesOff(self, master):
@@ -105,23 +104,17 @@ class Plugin(iplug.ThreadedPlugin):
         # use set comprehension to avoid duplicate controller ID's
         slaves = { info['controllerId'] for info in zoneList }
 
-        # stop watering on all zones attched to this master
+        # stop watering on all slaves attched to this master
         for slaveId in slaves:
 
-            # XXX we don't really need the indigo device to send the stop
-            # command, but having the name is nice for logging purposes
+            controller = indigo.devices[slaveId]
+            self.logger.debug('stopping zones on controller: %s', controller.name)
 
-            if slaveId not in indigo.devices:
-                self.logger.warn('controller not found: %d', contollerId)
+            indigo.sprinkler.stop(controller)
 
-            else:
-                controller = indigo.devices[slaveId]
-                self.logger.debug('stopping zones on controller: %s', controller.name)
-                indigo.sprinkler.stop(controller)
-
-                master.updateStateOnServer("activeZone", 0)
-                master.updateStateOnServer("activeSlaveId", 0)
-                master.updateStateOnServer("activeSlaveZone", 0)
+            master.updateStateOnServer("activeZone", 0)
+            master.updateStateOnServer("activeSlaveId", 0)
+            master.updateStateOnServer("activeSlaveZone", 0)
 
     #---------------------------------------------------------------------------
     def _startDevice_MasterController(self, device):
@@ -129,14 +122,10 @@ class Plugin(iplug.ThreadedPlugin):
         # reset the master map for the controller device
         self.MasterMap[device.id] = list()
 
-        if 'controllers' not in device.pluginProps:
-            self.logger.error('invalid master controller: %s', device.name)
-            return
-
         controllers = device.pluginProps['controllers']
 
         if controllers is None or len(controllers) is 0:
-            self.logger.error('No slave controllers for device: %s', device.name)
+            self.logger.warn('Nothing to do for device: %s', device.name)
             return
 
         # build the master map from all selected controllers
@@ -150,7 +139,7 @@ class Plugin(iplug.ThreadedPlugin):
             controller = indigo.devices[slaveId]
 
             if controller.enabled is False or controller.configured is False:
-                self.logger.warn('controller is not enabled: %s', controller.name)
+                self.logger.warn('Controller is not enabled: %s', controller.name)
                 continue
 
             self.logger.debug('mapping controller: %s', controller.name)
@@ -191,21 +180,20 @@ class Plugin(iplug.ThreadedPlugin):
 
         self.logger.debug('adding %d zones to %s', len(zoneList), device.name)
 
+        # update inherited props for sprinkler devices
         props = device.pluginProps
         props["NumZones"] = len(zoneList)
         props["ZoneNames"] = ', '.join(zoneNames)
         props["MaxZoneDurations"] = ', '.join(durations)
-        # if activeScheduleName:
-        #     props["ScheduledZoneDurations"] = activeScheduleName
 
         device.replacePluginPropsOnServer(props)
 
     #---------------------------------------------------------------------------
-    def _getSlaveZoneInfo(self, master, masterZoneNumber):
+    def _getSlaveZoneInfo(self, master, masterZoneId):
         zoneList = self.MasterMap[master.id]
 
         # zone numbers are 1-based, but our map starts at 0
-        masterZoneIndex = masterZoneNumber - 1
+        masterZoneIndex = masterZoneId - 1
 
         return zoneList[masterZoneIndex]
 
