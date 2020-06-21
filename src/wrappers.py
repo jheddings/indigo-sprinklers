@@ -49,7 +49,7 @@ class MasterController(ControllerBase):
 
         if masterZoneId > len(self.zoneInfoList):
             self.logger.error(u'No such zone: %d -- %s', masterZoneId, self.device.name)
-            self._setActiveZone(0, 0, 0)
+            self._updateActiveDeviceStates(0, 0, 0)
             return False
 
         # zones are 1-based indexing, so subtract 1 for our list
@@ -62,7 +62,7 @@ class MasterController(ControllerBase):
 
         if slaveDeviceId not in indigo.devices:
             self.logger.error(u'Device not found (may have been deleted): %s', slaveDeviceId)
-            self._setActiveZone(0, 0, 0)
+            self._updateActiveDeviceStates(0, 0, 0)
             return False
 
         slaveDevice = indigo.devices[slaveDeviceId]
@@ -72,7 +72,7 @@ class MasterController(ControllerBase):
 
         self._prepForNextZone(slaveDeviceId, slaveZoneId)
         indigo.sprinkler.setActiveZone(slaveDevice, index=slaveZoneId)
-        self._setActiveZone(masterZoneId, slaveDeviceId, slaveZoneId)
+        self._updateActiveDeviceStates(masterZoneId, slaveDeviceId, slaveZoneId)
 
         return True
 
@@ -95,7 +95,7 @@ class MasterController(ControllerBase):
 
             indigo.sprinkler.stop(controller)
 
-        self._setActiveZone(0, 0, 0)
+        self._updateActiveDeviceStates(0, 0, 0)
 
     #---------------------------------------------------------------------------
     def updateStatus(self):
@@ -113,7 +113,7 @@ class MasterController(ControllerBase):
             activeSlaveZone = activeSlaveDevice.activeZone
             activeMasterZone = self._getMasterZoneNumber(activeSlaveDevice, activeSlaveZone)
 
-        self._setActiveZone(activeMasterZone, activeSlaveId, activeSlaveZone)
+        self._updateActiveDeviceStates(activeMasterZone, activeSlaveId, activeSlaveZone)
 
     #---------------------------------------------------------------------------
     def start(self):
@@ -245,7 +245,7 @@ class MasterController(ControllerBase):
             indigo.sprinkler.stop(activeSlaveId)
 
     #---------------------------------------------------------------------------
-    def _setActiveZone(self, masterZone, slaveDeviceId=None, slaveZone=None):
+    def _updateActiveDeviceStates(self, masterZone, slaveDeviceId=None, slaveZone=None):
         self.logger.debug(u'setting active zone status: %s [%d] => %s:%s',
                           self.device.name, masterZone, slaveDeviceId, slaveZone)
 
