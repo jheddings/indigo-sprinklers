@@ -18,8 +18,6 @@ class Plugin(iplug.PluginBase):
     def deviceStartComm(self, device):
         iplug.PluginBase.deviceStartComm(self, device)
 
-        self.logger.debug(u'current props: %s', device.pluginProps)
-
         typeId = device.deviceTypeId
 
         if typeId == 'MasterController':
