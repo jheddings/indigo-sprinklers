@@ -31,4 +31,18 @@
     </States>
   </Device>
 
+  <!--
+    XXX this is only used for testing...
+    I should probably comment it out for a release
+  -->
+  <Device type="sprinkler" id="TestController">
+    <Name>Test Controller</Name>
+
+    <ConfigUI>
+			<Field type="textfield" id="MaxZoneDurations" defaultValue="5,5,5,5">
+				<Label>Zone durations:</Label>
+			</Field>
+    </ConfigUI>
+  </Device>
+
 </Devices>
