@@ -33,10 +33,6 @@ class Plugin(iplug.PluginBase):
             self.MasterMap.pop(device.id, None)
 
     #---------------------------------------------------------------------------
-    def loadPluginPrefs(self, prefs):
-        iplug.PluginBase.loadPluginPrefs(self, prefs)
-
-    #---------------------------------------------------------------------------
     # Sprinkler Control Action callback
     def actionControlSprinkler(self, action, device):
         self.logger.debug(u'sprinkler control -- %s : %s', device.name, action.sprinklerAction)
@@ -60,21 +56,27 @@ class Plugin(iplug.PluginBase):
             self._updateDevice(device)
 
     #---------------------------------------------------------------------------
-    def _turnZoneOn(self, master, masterZoneId):
-        self.logger.debug(u'turning on master zone %d -- %s', masterZoneId, master.name)
+    def _turnZoneOn(self, masterDevice, masterZoneId):
+        self.logger.debug(u'turning on master zone %d -- %s', masterZoneId, masterDevice.name)
 
         # lookup the slave zone information from the master map
-        zoneInfo = self._getSlaveZoneInfo(master, masterZoneId)
+        zoneInfo = self._getZoneInfo(masterDevice, masterZoneId)
         self.logger.debug(u'found zone info in map: %s', zoneInfo)
 
         zoneName = zoneInfo['zoneName']
         zoneId = zoneInfo['zoneId']
         slaveId = zoneInfo['controllerId']
-        slave = indigo.devices[slaveId]
+
+        if slaveId not in indigo.devices:
+            self.logger.error(u'Device not found: %s', slaveId)
+            self._setActiveZone(masterDevice, 0, 0, 0)
+            return False
+
+        slaveDevice = indigo.devices[slaveId]
 
         # check for an active program...
-        if 'activeSlaveId' in master.states:
-            activeSlaveId = master.states['activeSlaveId']
+        if 'activeSlaveId' in masterDevice.states:
+            activeSlaveId = masterDevice.states['activeSlaveId']
             self.logger.debug(u'active slave: %d', activeSlaveId)
 
             # if something is running, but it isn't on the same controller...
@@ -83,18 +85,17 @@ class Plugin(iplug.PluginBase):
                     indigo.sprinkler.stop(activeSlaveId)
 
         self.logger.debug(u'starting zone %s (%d) on slave: %s',
-                          zoneName, zoneId, slave.name)
+                          zoneName, zoneId, slaveDevice.name)
 
-        indigo.sprinkler.setActiveZone(slave, index=zoneId)
+        indigo.sprinkler.setActiveZone(slaveDevice, index=zoneId)
+        self._setActiveZone(masterDevice, masterZoneId, slaveId, zoneId)
 
-        master.updateStateOnServer("activeSlaveId", slaveId)
-        master.updateStateOnServer("activeSlaveZone", zoneId)
-        master.updateStateOnServer("activeZone", masterZoneId)
+        return True
 
     #---------------------------------------------------------------------------
-    def _allZonesOff(self, master):
-        self.logger.debug(u'turn off all zones on master: %s', master.name)
-        zoneList = self.MasterMap[master.id]
+    def _allZonesOff(self, masterDevice):
+        self.logger.debug(u'turn off all zones on master: %s', masterDevice.name)
+        zoneList = self.MasterMap[masterDevice.id]
 
         # use set comprehension to avoid duplicate controller ID's
         slaves = { info['controllerId'] for info in zoneList }
@@ -107,9 +108,20 @@ class Plugin(iplug.PluginBase):
 
             indigo.sprinkler.stop(controller)
 
-            master.updateStateOnServer("activeZone", 0)
-            master.updateStateOnServer("activeSlaveId", 0)
-            master.updateStateOnServer("activeSlaveZone", 0)
+        self._setActiveZone(masterDevice, 0, 0, 0)
+
+    #---------------------------------------------------------------------------
+    def _setActiveZone(self, masterDevice, masterZone, slaveId=None, slaveZone=None):
+        self.logger.debug(u'setting active zone status: %s [%d] => %s:%s',
+                          masterDevice.name, masterZone, slaveId, slaveZone)
+
+        masterDevice.updateStateOnServer('activeZone', masterZone)
+
+        if slaveId is not None:
+            masterDevice.updateStateOnServer('activeSlaveId', slaveId)
+
+        if slaveZone is not None:
+            masterDevice.updateStateOnServer('activeSlaveZone', slaveZone)
 
     #---------------------------------------------------------------------------
     def _startDevice_MasterController(self, device):
@@ -127,8 +139,9 @@ class Plugin(iplug.PluginBase):
         for slaveId in controllers:
             slaveId = int(slaveId)
 
+            # sometimes, devices get removed...
             if slaveId not in indigo.devices:
-                self.logger.warn(u'invalid slave controller: %s', slaveId)
+                self.logger.warn(u'Invalid controller: %s', slaveId)
                 continue
 
             controller = indigo.devices[slaveId]
@@ -145,27 +158,27 @@ class Plugin(iplug.PluginBase):
         self.logger.info(u'Sprinkler device "%s" ready', device.name)
 
     #---------------------------------------------------------------------------
-    def _rebuildMasterMap(self, master, slave):
-        if master.id == slave.id:
-            self.logger.warn(u'Circular device reference: %d', master.id)
+    def _rebuildMasterMap(self, masterDevice, slaveDevice):
+        if masterDevice.id == slaveDevice.id:
+            self.logger.warn(u'Circular device reference: %d', masterDevice.id)
             return
 
-        # TODO remove current master map entries for slave.id
+        # TODO remove current master map entries for slaveDevice.id
 
-        for idx in range(slave.zoneCount):
-            zoneName = slave.zoneNames[idx]
-            maxDuration = slave.zoneMaxDurations[idx]
+        for idx in range(slaveDevice.zoneCount):
+            zoneName = slaveDevice.zoneNames[idx]
+            maxDuration = slaveDevice.zoneMaxDurations[idx]
             zoneId = idx + 1
 
             zoneInfo = {
-                'controllerId' : slave.id,
+                'controllerId' : slaveDevice.id,
                 'zoneName' : zoneName,
                 'maxDuration' : maxDuration,
                 'zoneId' : zoneId
             }
 
-            self.logger.debug(u'adding to master map: %d => %s', master.id, zoneInfo)
-            self.MasterMap[master.id].append(zoneInfo)
+            self.logger.debug(u'adding to master map: %d => %s', masterDevice.id, zoneInfo)
+            self.MasterMap[masterDevice.id].append(zoneInfo)
 
     #---------------------------------------------------------------------------
     def _rebuildMasterDeviceProps(self, device):
@@ -184,28 +197,39 @@ class Plugin(iplug.PluginBase):
         device.replacePluginPropsOnServer(props)
 
     #---------------------------------------------------------------------------
-    def _getSlaveZoneInfo(self, master, masterZoneId):
-        zoneList = self.MasterMap[master.id]
+    def _getZoneInfo(self, masterDevice, masterZoneId):
+        if masterDevice.id not in self.MasterMap:
+            self.logger.error('Master controller not found in map: %d', masterDevice.id)
+            return None
+
+        zoneList = self.MasterMap[masterDevice.id]
 
         # zone numbers are 1-based, but our map starts at 0
         masterZoneIndex = masterZoneId - 1
 
+        if masterZoneIndex >= len(zoneList):
+            return None
+
         return zoneList[masterZoneIndex]
 
     #---------------------------------------------------------------------------
-    def _getMasterZoneNumber(self, master, slave, slaveZoneNumber=None):
+    def _getMasterZoneNumber(self, masterDevice, slaveDevice, slaveZoneNumber=None):
         if slaveZoneNumber is None:
-            slaveZoneNumber = slave.activeZone
+            slaveZoneNumber = slaveDevice.activeZone
 
         if slaveZoneNumber is 0 or slaveZoneNumber is None:
             return 0
 
+        if masterDevice.id not in self.MasterMap:
+            self.logger.error('Master controller not found in map: %d', masterDevice.id)
+            return None
+
         # find the slave zone ID in the master map
-        zoneList = self.MasterMap[master.id]
+        zoneList = self.MasterMap[masterDevice.id]
         for masterZoneIndex in range(len(zoneList)):
             zoneInfo = zoneList[masterZoneIndex]
 
-            if zoneInfo['controllerId'] == slave.id:
+            if zoneInfo['controllerId'] == slaveDevice.id:
                 if zoneInfo['zoneId'] == slaveZoneNumber:
                     return masterZoneIndex + 1
 
@@ -221,14 +245,16 @@ class Plugin(iplug.PluginBase):
             self._updateDevice_MasterController(device)
 
     #---------------------------------------------------------------------------
-    def _updateDevice_MasterController(self, master):
-        self.logger.debug(u'update status on master device: %s', master.name)
-        zoneList = self.MasterMap[master.id]
+    def _updateDevice_MasterController(self, masterDevice):
+        self.logger.debug(u'update status on master device: %s', masterDevice.name)
+        zoneList = self.MasterMap[masterDevice.id]
 
         # use set comprehension to avoid duplicate controller ID's
         slaves = { info['controllerId'] for info in zoneList }
 
         activeMasterZone = 0
+        activeSlaveId = 0
+        activeSlaveZone = 0
 
         # look for the active zone on associated controllers
         for slaveId in slaves:
@@ -239,16 +265,16 @@ class Plugin(iplug.PluginBase):
             else:
 
                 # get the active zone on the slave controller
-                slave = indigo.devices[slaveId]
-                slaveZoneNumber = slave.activeZone
-                self.logger.debug(u'active zone on slave: %s -- %s', slave.name, slaveZoneNumber)
+                slaveDevice = indigo.devices[slaveId]
+                slaveZoneNumber = slaveDevice.activeZone
+                self.logger.debug(u'active zone on slave: %s -- %s', slaveDevice.name, slaveZoneNumber)
 
                 # TODO we should check if there are multiple active zones
 
                 if slaveZoneNumber is not None and slaveZoneNumber is not 0:
-                    master.updateStateOnServer("activeSlaveId", slaveId)
-                    master.updateStateOnServer("activeSlaveZone", slaveZoneNumber)
-                    activeMasterZone = self._getMasterZoneNumber(master, slave)
+                    activeSlaveId = slaveId
+                    activeSlaveZone = slaveZoneNumber
+                    activeMasterZone = self._getMasterZoneNumber(masterDevice, slaveDevice)
 
-        master.updateStateOnServer("activeZone", activeMasterZone)
+        self._setActiveZone(masterDevice, activeMasterZone, activeSlaveId, activeSlaveZone)
 
