@@ -137,7 +137,7 @@ class Plugin(iplug.PluginBase):
                 self.logger.warn(u'Controller is not enabled: %s', controller.name)
                 continue
 
-            self.logger.debug(u'mapping controller: %s', controller.name)
+            self.logger.debug(u'mapping slave controller: %s', controller.name)
             self._rebuildMasterMap(device, controller)
 
         # update device properties based on master map
