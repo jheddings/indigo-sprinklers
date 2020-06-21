@@ -15,6 +15,20 @@
       </Field>
 
     </ConfigUI>
+
+    <States>
+      <State id="activeSlaveId">
+        <ValueType>Integer</ValueType>
+        <TriggerLabel>Active Slave ID</TriggerLabel>
+        <ControlPageLabel>Active Slave ID</ControlPageLabel>
+      </State>
+
+      <State id="activeSlaveZone">
+        <ValueType>Integer</ValueType>
+        <TriggerLabel>Active Slave Zone</TriggerLabel>
+        <ControlPageLabel>Active Slave Zone</ControlPageLabel>
+      </State>
+    </States>
   </Device>
 
 </Devices>
