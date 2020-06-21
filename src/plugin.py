@@ -5,11 +5,10 @@ import copy
 
 import iplug
 
-# TODO implement status request in case zones are managed outside of the master
 # TODO should we filter other virtual master devices out of the selection list?
 
 ################################################################################
-class Plugin(iplug.PluginBase):
+class Plugin(iplug.ThreadedPlugin):
 
     # used by master controllers to manage zone mappings
     MasterMap = dict()
@@ -31,6 +30,10 @@ class Plugin(iplug.PluginBase):
 
         if typeId == 'MasterController':
             self.MasterMap.pop(device.id, None)
+
+    #---------------------------------------------------------------------------
+    def runLoopStep(self): pass
+    # TODO self._updateAllStatus()
 
     #---------------------------------------------------------------------------
     def loadPluginPrefs(self, prefs):
@@ -62,11 +65,20 @@ class Plugin(iplug.PluginBase):
             pass
 
     #---------------------------------------------------------------------------
+    # General Action callback
+    def actionControlUniversal(self, action, device):
+        self.logger.debug('universal control -- %s : %s', device.name, action.deviceAction)
+
+        ###### STATUS REQUEST ######
+        if action.deviceAction == indigo.kUniversalAction.RequestStatus:
+            self._updateStatus(device)
+
+    #---------------------------------------------------------------------------
     def _turnZoneOn(self, master, masterZoneNumber):
         # TODO need to stop watering on other controllers...
         self.logger.debug('turning on master zone %d -- %s', masterZoneNumber, master.name)
 
-        zoneInfo = self._getRemoteZoneInfo(master, masterZoneNumber)
+        zoneInfo = self._getSlaveZoneInfo(master, masterZoneNumber)
         zoneName = zoneInfo['zoneName']
         zoneId = zoneInfo['zoneId']
         controllerId = zoneInfo['controllerId']
@@ -119,7 +131,7 @@ class Plugin(iplug.PluginBase):
         controllers = device.pluginProps['controllers']
 
         if len(controllers) <= 0:
-            self.logger.error('No remote controllers for device: %s', device.name)
+            self.logger.error('No slave controllers for device: %s', device.name)
             return
 
         # build the master map from all selected controllers
@@ -144,20 +156,20 @@ class Plugin(iplug.PluginBase):
         self.logger.info('Sprinkler device "%s" ready', device.name)
 
     #---------------------------------------------------------------------------
-    def _rebuildMasterMap(self, master, remote):
-        if master.id == remote.id:
+    def _rebuildMasterMap(self, master, slave):
+        if master.id == slave.id:
             self.logger.warn('Circular device reference: %d', master.id)
             return
 
-        # TODO remove current master map entries for remote.id
+        # TODO remove current master map entries for slave.id
 
-        for idx in range(remote.zoneCount):
-            zoneName = remote.zoneNames[idx]
-            maxDuration = remote.zoneMaxDurations[idx]
+        for idx in range(slave.zoneCount):
+            zoneName = slave.zoneNames[idx]
+            maxDuration = slave.zoneMaxDurations[idx]
             zoneId = idx + 1
 
             zoneInfo = {
-                'controllerId' : remote.id,
+                'controllerId' : slave.id,
                 'zoneName' : zoneName,
                 'maxDuration' : maxDuration,
                 'zoneId' : zoneId
@@ -184,11 +196,69 @@ class Plugin(iplug.PluginBase):
         device.replacePluginPropsOnServer(props)
 
     #---------------------------------------------------------------------------
-    def _getRemoteZoneInfo(self, master, masterZoneNumber):
+    def _getSlaveZoneInfo(self, master, masterZoneNumber):
         zoneList = self.MasterMap[master.id]
 
         # zone numbers are 1-based, but our map starts at 0
         masterZoneIndex = masterZoneNumber - 1
 
         return zoneList[masterZoneIndex]
+
+    #---------------------------------------------------------------------------
+    def _getMasterZoneNumber(self, master, slave, slaveZoneNumber=None):
+        if slaveZoneNumber is None:
+            slaveZoneNumber = slave.activeZone
+
+        if slaveZoneNumber is 0 or slaveZoneNumber is None:
+            return 0
+
+        # find the slave zone ID in the master map
+        zoneList = self.MasterMap[master.id]
+        for masterZoneIndex in range(len(zoneList)):
+            zoneInfo = zoneList[masterZoneIndex]
+
+            if zoneInfo['controllerId'] == slave.id:
+                if zoneInfo['zoneId'] == slaveZoneNumber:
+                    return masterZoneIndex + 1
+
+        return None
+
+    #---------------------------------------------------------------------------
+    def _updateStatus(self, device):
+        self.logger.debug('update status for device: %s', device.name)
+
+        typeId = device.deviceTypeId
+
+        if typeId == 'MasterController':
+            self._updateStatus_MasterController(device)
+
+    #---------------------------------------------------------------------------
+    def _updateStatus_MasterController(self, master):
+        self.logger.debug('update status on master device: %s', master.name)
+        zoneList = self.MasterMap[master.id]
+
+        # use set comprehension to avoid duplicate controller ID's
+        controllers = { info['controllerId'] for info in zoneList }
+
+        activeMasterZone = 0
+
+        # look for the active zone on associated controllers
+        for controllerId in controllers:
+
+            if controllerId not in indigo.devices:
+                self.logger.warn('Controller not found: %d', contollerId)
+
+            else:
+
+                # get the active zone on the slave controller
+                slave = indigo.devices[controllerId]
+                slaveZoneNumber = slave.activeZone
+                self.logger.debug('active zone on slave: %s -- %s', slave.name, slaveZoneNumber)
+
+                # TODO we should check if there are multiple active zones
+
+                if slaveZoneNumber is not None and slaveZoneNumber is not 0:
+                    activeMasterZone = self._getMasterZoneNumber(master, slave)
+
+        master.updateStateOnServer("activeZone", activeMasterZone)
 
