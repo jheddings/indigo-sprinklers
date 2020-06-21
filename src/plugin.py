@@ -5,7 +5,7 @@ import copy
 
 import iplug
 
-# TODO watch for zones to start from the sub controllers and update status accordingly
+# TODO implement status request in case zones are managed outside of the master
 # TODO should we filter other virtual master devices out of the selection list?
 
 ################################################################################
@@ -63,11 +63,10 @@ class Plugin(iplug.PluginBase):
 
     #---------------------------------------------------------------------------
     def _turnZoneOn(self, master, masterZoneNumber):
+        # TODO need to stop watering on other controllers...
         self.logger.debug('turning on master zone %d -- %s', masterZoneNumber, master.name)
 
-        # zone numbers are 1-based, but our map starts at 0
-        zoneList = self.MasterMap[master.id]
-        zoneInfo = zoneList[masterZoneNumber-1]
+        zoneInfo = self._getRemoteZoneInfo(master, masterZoneNumber)
         zoneName = zoneInfo['zoneName']
         zoneId = zoneInfo['zoneId']
         controllerId = zoneInfo['controllerId']
@@ -183,4 +182,13 @@ class Plugin(iplug.PluginBase):
         #     props["ScheduledZoneDurations"] = activeScheduleName
 
         device.replacePluginPropsOnServer(props)
+
+    #---------------------------------------------------------------------------
+    def _getRemoteZoneInfo(self, master, masterZoneNumber):
+        zoneList = self.MasterMap[master.id]
+
+        # zone numbers are 1-based, but our map starts at 0
+        masterZoneIndex = masterZoneNumber - 1
+
+        return zoneList[masterZoneIndex]
 
