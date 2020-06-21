@@ -6,12 +6,13 @@ import copy
 import iplug
 
 # TODO watch for zones to start from the sub controllers and update status accordingly
+# TODO should we filter other virtual master devices out of the selection list?
 
 ################################################################################
 class Plugin(iplug.PluginBase):
 
     # used by master controllers to manage zone mappings
-    master_map = dict()
+    MasterMap = dict()
 
     #---------------------------------------------------------------------------
     def deviceStartComm(self, device):
@@ -29,7 +30,7 @@ class Plugin(iplug.PluginBase):
         typeId = device.deviceTypeId
 
         if typeId == 'MasterController':
-            self.master_map.pop(device.id, None)
+            self.MasterMap.pop(device.id, None)
 
     #---------------------------------------------------------------------------
     def loadPluginPrefs(self, prefs):
@@ -42,7 +43,8 @@ class Plugin(iplug.PluginBase):
 
         ###### ZONE ON ######
         if action.sprinklerAction == indigo.kSprinklerAction.ZoneOn:
-            pass
+            zone = action.zoneIndex
+            self._turnZoneOn(device, zone)
 
         ###### ALL ZONES OFF ######
         elif action.sprinklerAction == indigo.kSprinklerAction.AllZonesOff:
@@ -60,11 +62,35 @@ class Plugin(iplug.PluginBase):
             pass
 
     #---------------------------------------------------------------------------
+    def _turnZoneOn(self, master, masterZoneNumber):
+        self.logger.debug('turning on master zone %d -- %s', masterZoneNumber, master.name)
+
+        # zone numbers are 1-based, but our map starts at 0
+        zoneList = self.MasterMap[master.id]
+        zoneInfo = zoneList[masterZoneNumber-1]
+        zoneName = zoneInfo['zoneName']
+        zoneId = zoneInfo['zoneId']
+        controllerId = zoneInfo['controllerId']
+
+        if controllerId not in indigo.devices:
+            self.logger.warn('controller not found: %d', contollerId)
+
+        else:
+            controller = indigo.devices[controllerId]
+
+            self.logger.debug('starting zone %s (%d) on controller: %s',
+                              zoneName, zoneId, controller.name)
+
+            indigo.sprinkler.setActiveZone(controller, index=zoneId)
+            master.updateStateOnServer("activeZone", masterZoneNumber)
+
+    #---------------------------------------------------------------------------
     def _allZonesOff(self, master):
-        zone_list = self.master_map[master.id]
+        self.logger.debug('turn off all zones on master: %s', master.name)
+        zoneList = self.MasterMap[master.id]
 
         # use set comprehension to avoid duplicate controller ID's
-        controllers = { info['controllerId'] for info in zone_list }
+        controllers = { info['controllerId'] for info in zoneList }
 
         # stop watering on all zones attched to this master
         for controllerId in controllers:
@@ -77,14 +103,15 @@ class Plugin(iplug.PluginBase):
 
             else:
                 controller = indigo.devices[controllerId]
-                self.logger.info('Stopping zones on controller: %s', controller.name)
-                indigo.sprinkler.stop(controller.id)
+                self.logger.debug('stopping zones on controller: %s', controller.name)
+                indigo.sprinkler.stop(controller)
+                master.updateStateOnServer("activeZone", 0)
 
     #---------------------------------------------------------------------------
     def _startDevice_MasterController(self, device):
 
         # reset the master map for the controller device
-        self.master_map[device.id] = list()
+        self.MasterMap[device.id] = list()
 
         if 'controllers' not in device.pluginProps:
             self.logger.error('invalid master controller: %s', device.name)
@@ -120,10 +147,10 @@ class Plugin(iplug.PluginBase):
     #---------------------------------------------------------------------------
     def _rebuildMasterMap(self, master, remote):
         if master.id == remote.id:
-            self.logger.warn('circular device reference: %d', master.id)
+            self.logger.warn('Circular device reference: %d', master.id)
             return
 
-        # TODO remove current map entries for remote.id
+        # TODO remove current master map entries for remote.id
 
         for idx in range(remote.zoneCount):
             zoneName = remote.zoneNames[idx]
@@ -138,25 +165,19 @@ class Plugin(iplug.PluginBase):
             }
 
             self.logger.debug('adding to master map: %d => %s', master.id, zoneInfo)
-            self.master_map[master.id].append(zoneInfo)
+            self.MasterMap[master.id].append(zoneInfo)
 
     #---------------------------------------------------------------------------
     def _rebuildMasterDeviceProps(self, device):
+        zoneList = self.MasterMap[device.id]
+        zoneNames = [info['zoneName'] for info in zoneList]
+        durations = [str(info['maxDuration']) for info in zoneList]
 
-        # some sanity checking...
-        if device.id not in self.master_map:
-            self.logger.error('No device in master map: %d', device.id)
-            return
-
-        zone_list = self.master_map[device.id]
-        zone_names = [info['zoneName'] for info in zone_list]
-        durations = [str(info['maxDuration']) for info in zone_list]
-
-        self.logger.debug('adding %d zones to %s', len(zone_list), device.name)
+        self.logger.debug('adding %d zones to %s', len(zoneList), device.name)
 
         props = device.pluginProps
-        props["NumZones"] = len(zone_list)
-        props["ZoneNames"] = ', '.join(zone_names)
+        props["NumZones"] = len(zoneList)
+        props["ZoneNames"] = ', '.join(zoneNames)
         props["MaxZoneDurations"] = ', '.join(durations)
         # if activeScheduleName:
         #     props["ScheduledZoneDurations"] = activeScheduleName
