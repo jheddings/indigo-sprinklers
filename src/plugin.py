@@ -6,9 +6,10 @@ import copy
 import iplug
 
 # TODO should we filter other virtual master devices out of the selection list?
+# TODO watch attached controllers to keep master devices status current
 
 ################################################################################
-class Plugin(iplug.ThreadedPlugin):
+class Plugin(iplug.PluginBase):
 
     # used by master controllers to manage zone mappings
     MasterMap = dict()
@@ -17,7 +18,7 @@ class Plugin(iplug.ThreadedPlugin):
     def deviceStartComm(self, device):
         iplug.PluginBase.deviceStartComm(self, device)
 
-        self.logger.debug('current props: %s', device.pluginProps)
+        self.logger.debug(u'current props: %s', device.pluginProps)
 
         typeId = device.deviceTypeId
 
@@ -34,17 +35,13 @@ class Plugin(iplug.ThreadedPlugin):
             self.MasterMap.pop(device.id, None)
 
     #---------------------------------------------------------------------------
-    def runLoopStep(self): pass
-    # TODO self._updateAllDevices()
-
-    #---------------------------------------------------------------------------
     def loadPluginPrefs(self, prefs):
         iplug.PluginBase.loadPluginPrefs(self, prefs)
 
     #---------------------------------------------------------------------------
     # Sprinkler Control Action callback
     def actionControlSprinkler(self, action, device):
-        self.logger.debug('sprinkler control -- %s : %s', device.name, action.sprinklerAction)
+        self.logger.debug(u'sprinkler control -- %s : %s', device.name, action.sprinklerAction)
 
         ###### ZONE ON ######
         if action.sprinklerAction == indigo.kSprinklerAction.ZoneOn:
@@ -58,19 +55,19 @@ class Plugin(iplug.ThreadedPlugin):
     #---------------------------------------------------------------------------
     # General Action callback
     def actionControlUniversal(self, action, device):
-        self.logger.debug('universal control -- %s : %s', device.name, action.deviceAction)
+        self.logger.debug(u'universal control -- %s : %s', device.name, action.deviceAction)
 
         ###### STATUS REQUEST ######
         if action.deviceAction == indigo.kUniversalAction.RequestStatus:
-            self._updateStatus(device)
+            self._updateDevice(device)
 
     #---------------------------------------------------------------------------
     def _turnZoneOn(self, master, masterZoneId):
-        self.logger.debug('turning on master zone %d -- %s', masterZoneId, master.name)
+        self.logger.debug(u'turning on master zone %d -- %s', masterZoneId, master.name)
 
         # lookup the slave zone information from the master map
         zoneInfo = self._getSlaveZoneInfo(master, masterZoneId)
-        self.logger.debug('found zone info in map: %s', zoneInfo)
+        self.logger.debug(u'found zone info in map: %s', zoneInfo)
 
         zoneName = zoneInfo['zoneName']
         zoneId = zoneInfo['zoneId']
@@ -80,14 +77,14 @@ class Plugin(iplug.ThreadedPlugin):
         # check for an active program...
         if 'activeSlaveId' in master.states:
             activeSlaveId = master.states['activeSlaveId']
-            self.logger.debug('active slave: %d', activeSlaveId)
+            self.logger.debug(u'active slave: %d', activeSlaveId)
 
             # if something is running, but it isn't on the same controller...
             if activeSlaveId is not 0 and activeSlaveId is not None:
                 if activeSlaveId != slaveId:
                     indigo.sprinkler.stop(activeSlaveId)
 
-        self.logger.debug('starting zone %s (%d) on slave: %s',
+        self.logger.debug(u'starting zone %s (%d) on slave: %s',
                           zoneName, zoneId, slave.name)
 
         indigo.sprinkler.setActiveZone(slave, index=zoneId)
@@ -98,7 +95,7 @@ class Plugin(iplug.ThreadedPlugin):
 
     #---------------------------------------------------------------------------
     def _allZonesOff(self, master):
-        self.logger.debug('turn off all zones on master: %s', master.name)
+        self.logger.debug(u'turn off all zones on master: %s', master.name)
         zoneList = self.MasterMap[master.id]
 
         # use set comprehension to avoid duplicate controller ID's
@@ -108,7 +105,7 @@ class Plugin(iplug.ThreadedPlugin):
         for slaveId in slaves:
 
             controller = indigo.devices[slaveId]
-            self.logger.debug('stopping zones on controller: %s', controller.name)
+            self.logger.debug(u'stopping zones on controller: %s', controller.name)
 
             indigo.sprinkler.stop(controller)
 
@@ -125,7 +122,7 @@ class Plugin(iplug.ThreadedPlugin):
         controllers = device.pluginProps['controllers']
 
         if controllers is None or len(controllers) is 0:
-            self.logger.warn('Nothing to do for device: %s', device.name)
+            self.logger.warn(u'Nothing to do for device: %s', device.name)
             return
 
         # build the master map from all selected controllers
@@ -133,26 +130,26 @@ class Plugin(iplug.ThreadedPlugin):
             slaveId = int(slaveId)
 
             if slaveId not in indigo.devices:
-                self.logger.warn('invalid slave controller: %s', slaveId)
+                self.logger.warn(u'invalid slave controller: %s', slaveId)
                 continue
 
             controller = indigo.devices[slaveId]
 
             if controller.enabled is False or controller.configured is False:
-                self.logger.warn('Controller is not enabled: %s', controller.name)
+                self.logger.warn(u'Controller is not enabled: %s', controller.name)
                 continue
 
-            self.logger.debug('mapping controller: %s', controller.name)
+            self.logger.debug(u'mapping controller: %s', controller.name)
             self._rebuildMasterMap(device, controller)
 
         # update device properties based on master map
         self._rebuildMasterDeviceProps(device)
-        self.logger.info('Sprinkler device "%s" ready', device.name)
+        self.logger.info(u'Sprinkler device "%s" ready', device.name)
 
     #---------------------------------------------------------------------------
     def _rebuildMasterMap(self, master, slave):
         if master.id == slave.id:
-            self.logger.warn('Circular device reference: %d', master.id)
+            self.logger.warn(u'Circular device reference: %d', master.id)
             return
 
         # TODO remove current master map entries for slave.id
@@ -169,7 +166,7 @@ class Plugin(iplug.ThreadedPlugin):
                 'zoneId' : zoneId
             }
 
-            self.logger.debug('adding to master map: %d => %s', master.id, zoneInfo)
+            self.logger.debug(u'adding to master map: %d => %s', master.id, zoneInfo)
             self.MasterMap[master.id].append(zoneInfo)
 
     #---------------------------------------------------------------------------
@@ -178,7 +175,7 @@ class Plugin(iplug.ThreadedPlugin):
         zoneNames = [info['zoneName'] for info in zoneList]
         durations = [str(info['maxDuration']) for info in zoneList]
 
-        self.logger.debug('adding %d zones to %s', len(zoneList), device.name)
+        self.logger.debug(u'adding %d zones to %s', len(zoneList), device.name)
 
         # update inherited props for sprinkler devices
         props = device.pluginProps
@@ -217,17 +214,17 @@ class Plugin(iplug.ThreadedPlugin):
         return None
 
     #---------------------------------------------------------------------------
-    def _updateStatus(self, device):
-        self.logger.debug('update status for device: %s', device.name)
+    def _updateDevice(self, device):
+        self.logger.debug(u'update status for device: %s', device.name)
 
         typeId = device.deviceTypeId
 
         if typeId == 'MasterController':
-            self._updateStatus_MasterController(device)
+            self._updateDevice_MasterController(device)
 
     #---------------------------------------------------------------------------
-    def _updateStatus_MasterController(self, master):
-        self.logger.debug('update status on master device: %s', master.name)
+    def _updateDevice_MasterController(self, master):
+        self.logger.debug(u'update status on master device: %s', master.name)
         zoneList = self.MasterMap[master.id]
 
         # use set comprehension to avoid duplicate controller ID's
@@ -239,14 +236,14 @@ class Plugin(iplug.ThreadedPlugin):
         for slaveId in slaves:
 
             if slaveId not in indigo.devices:
-                self.logger.warn('Controller not found: %d', contollerId)
+                self.logger.warn(u'Controller not found: %d', contollerId)
 
             else:
 
                 # get the active zone on the slave controller
                 slave = indigo.devices[slaveId]
                 slaveZoneNumber = slave.activeZone
-                self.logger.debug('active zone on slave: %s -- %s', slave.name, slaveZoneNumber)
+                self.logger.debug(u'active zone on slave: %s -- %s', slave.name, slaveZoneNumber)
 
                 # TODO we should check if there are multiple active zones
 

@@ -2,8 +2,6 @@
 <PluginConfig>
   <SupportURL>http://forums.indigodomo.com/viewforum.php?f=234</SupportURL>
 
-  <Field id="separator1" type="separator" />
-
   <Field id="logLevel" type="menu" defaultValue="20">
     <Label>Event Logging Level:</Label>
     <List>
