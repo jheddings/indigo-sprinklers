@@ -277,16 +277,6 @@ class TestController(ControllerBase):
         self.device.updateStateOnServer('activeZone', 0)
 
     #---------------------------------------------------------------------------
-    def updateStatus(self):
-        self.logger.debug(u'current status: %s -- %s',
-                          self.device.name, self.device.activeZone)
-
-        # FIXME this isn't working quite right...
-
-        if self.device.activeZone is None:
-            self.device.updateStateOnServer('activeZone', 0)
-
-    #---------------------------------------------------------------------------
     def start(self):
         props = self.device.pluginProps
 
