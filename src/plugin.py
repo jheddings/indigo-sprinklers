@@ -8,7 +8,7 @@ import wrappers
 # TODO should we filter other virtual master devices out of the selection list?
 
 ################################################################################
-class Plugin(iplug.PluginBase):
+class Plugin(iplug.ThreadedPlugin):
 
     devices = dict()
 
@@ -16,6 +16,22 @@ class Plugin(iplug.PluginBase):
     def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
         iplug.PluginBase.__init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
         self.logger = logging.getLogger('Plugin.sprinklers')
+
+    #---------------------------------------------------------------------------
+    def validatePrefsConfigUi(self, values):
+        errors = indigo.Dict()
+
+        iplug.validateConfig_Int('threadLoopDelay', values, errors, min=60, max=3600)
+
+        return ((len(errors) == 0), values, errors)
+
+    #---------------------------------------------------------------------------
+    def validateDeviceConfigUi(self, values, typeId, devId):
+        errors = indigo.Dict()
+
+        # TODO
+
+        return ((len(errors) == 0), values, errors)
 
     #---------------------------------------------------------------------------
     def deviceStartComm(self, device):
@@ -41,6 +57,10 @@ class Plugin(iplug.PluginBase):
 
         obj = self.devices.pop(device.id, None)
         if obj is not None: obj.stop()
+
+    #---------------------------------------------------------------------------
+    def runLoopStep(self):
+        self._updateAllStatus()
 
     #---------------------------------------------------------------------------
     # Sprinkler Control Action callback
@@ -77,6 +97,16 @@ class Plugin(iplug.PluginBase):
     def _allZonesOff(self, device):
         obj = self.devices[device.id]
         obj.allZonesOff()
+
+    #---------------------------------------------------------------------------
+    def _updateAllStatus(self):
+        self.logger.debug(u'update all devices')
+
+        for device in indigo.devices.itervalues('self'):
+            if device.enabled:
+                self._updateStatus(device)
+            else:
+                self.logger.debug(u'Device disabled: %s', device.name)
 
     #---------------------------------------------------------------------------
     def _updateStatus(self, device):

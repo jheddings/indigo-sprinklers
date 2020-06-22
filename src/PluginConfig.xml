@@ -2,6 +2,13 @@
 <PluginConfig>
   <SupportURL>http://forums.indigodomo.com/viewforum.php?f=234</SupportURL>
 
+  <Field type="textfield" id="threadLoopDelay" defaultValue="60">
+    <Label>Status check interval (seconds):</Label>
+  </Field>
+  <Field id="threadLoopDelayHelp" type="label" fontSize="mini" alignWithControl="true">
+    <Label>Polling interval for maintaining device status (60-3600)</Label>
+  </Field>
+
   <Field id="logLevel" type="menu" defaultValue="20">
     <Label>Event Logging Level:</Label>
     <List>
