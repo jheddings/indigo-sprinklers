@@ -90,13 +90,11 @@ class Plugin(iplug.ThreadedPlugin):
             self._allZonesOff(device)
 
         else:
-            obj = self.devices[device.id]
-            obj.turnZoneOn(zone)
+            self.devices[device.id].turnZoneOn(zone)
 
     #---------------------------------------------------------------------------
     def _allZonesOff(self, device):
-        obj = self.devices[device.id]
-        obj.allZonesOff()
+        self.devices[device.id].allZonesOff()
 
     #---------------------------------------------------------------------------
     def _updateAllStatus(self):
@@ -110,6 +108,5 @@ class Plugin(iplug.ThreadedPlugin):
 
     #---------------------------------------------------------------------------
     def _updateStatus(self, device):
-        obj = self.devices[device.id]
-        obj.updateStatus()
+        self.devices[device.id].updateStatus()
 
