@@ -48,7 +48,7 @@ class Plugin(iplug.ThreadedPlugin):
         # start the helper object
         if obj is not None:
             self.devices[device.id] = obj
-            obj.start()
+            obj.start(self)
             self.logger.info(u'"%s" -- device ready', device.name)
 
     #---------------------------------------------------------------------------
@@ -60,6 +60,7 @@ class Plugin(iplug.ThreadedPlugin):
 
     #---------------------------------------------------------------------------
     def runLoopStep(self):
+        # devices are monitored for changes, but this is a catch-all just in case
         self._updateAllStatus()
 
     #---------------------------------------------------------------------------

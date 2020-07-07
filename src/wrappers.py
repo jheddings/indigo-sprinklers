@@ -27,7 +27,7 @@ class ControllerBase:
     # FIXME start and stop are confusing, since they could refer to zones...
 
     #---------------------------------------------------------------------------
-    def start(self): pass
+    def start(self, plugin): pass
 
     #---------------------------------------------------------------------------
     def stop(self): pass
@@ -116,7 +116,16 @@ class MasterController(ControllerBase):
         self._updateActiveDeviceStates(activeMasterZone, activeSlaveId, activeSlaveZone)
 
     #---------------------------------------------------------------------------
-    def start(self):
+    def remoteDeviceChanged(self, plugin, device):
+        self.logger.debug(u'remote device updated: %s', device.name)
+
+        # XXX ideally, we would only update status for the device that changed
+        # instead, update out status to make sure things are kept current
+
+        self.updateStatus()
+
+    #---------------------------------------------------------------------------
+    def start(self, plugin):
         self.zoneInfoList = list()
 
         props = self.device.pluginProps
@@ -129,6 +138,8 @@ class MasterController(ControllerBase):
         # build the info list from all selected controllers
         for slaveDeviceId in controllers:
             slaveDeviceId = int(slaveDeviceId)
+
+            plugin.watchDeviceForChanges(slaveDeviceId, self.remoteDeviceChanged)
 
             # sometimes, devices get removed...
             if slaveDeviceId not in indigo.devices:
@@ -187,10 +198,12 @@ class MasterController(ControllerBase):
 
     #---------------------------------------------------------------------------
     def _getActiveSlave(self):
-        activeSlaveDevice = None
+        if self.zoneInfoList is None: return None
 
         # use set comprehension to avoid duplicate controller ID's
         slaves = { info['controllerId'] for info in self.zoneInfoList }
+
+        activeSlaveDevice = None
 
         for slaveDeviceId in slaves:
 
@@ -277,7 +290,7 @@ class TestController(ControllerBase):
         self.device.updateStateOnServer('activeZone', 0)
 
     #---------------------------------------------------------------------------
-    def start(self):
+    def start(self, plugin):
         props = self.device.pluginProps
 
         durations = props['MaxZoneDurations']
